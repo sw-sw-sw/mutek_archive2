@@ -1,0 +1,921 @@
+<title>Spiral Bloom</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,600&family=Manrope:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --ground:#0a0c10;
+    --surface:#14171dee;
+    --surface-2:#1c2029;
+    --line:#262b35;
+    --ink:#eef1f6;
+    --ink-dim:#8a93a3;
+    --ink-faint:#4d5666;
+    --accent:#5fd4d0;
+    --accent-dim:#2f4a49;
+    --live:#e8a33d;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:var(--ground);
+    color:var(--ink);
+    font-family:'Manrope',system-ui,sans-serif;
+    overflow:hidden;
+  }
+
+  .stage{
+    position:fixed;
+    inset:0;
+    background:var(--ground);
+  }
+
+  canvas#gl{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    display:block;
+    touch-action:none;
+  }
+
+  .hud{
+    position:absolute;
+    left:32px; bottom:28px;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px;
+    pointer-events:none;
+  }
+  .hud-row{display:flex; gap:10px; align-items:baseline;}
+  .hud-label{color:var(--ink-faint); letter-spacing:.08em; text-transform:uppercase; width:76px;}
+  .hud-value{color:var(--ink-dim); font-variant-numeric:tabular-nums;}
+  .hud-live{display:flex; align-items:center; gap:6px; margin-top:2px;}
+  .hud-dot{width:6px; height:6px; border-radius:50%; background:var(--live); box-shadow:0 0 6px var(--live); animation:pulse 1.6s ease-in-out infinite;}
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+
+  /* -------- panel -------- */
+
+  .panel-handle{
+    position:absolute;
+    top:50%; left:-21px;
+    transform:translateY(-50%);
+    width:21px; height:56px;
+    z-index:5;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-right:none;
+    border-radius:4px 0 0 4px;
+    color:var(--ink-dim);
+    font-size:14px;
+    line-height:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+  }
+  .panel-handle:hover{ color:var(--ink); border-color:var(--accent-dim); }
+  .panel-handle:focus-visible, .fader input:focus-visible, .preset-btn:focus-visible{
+    outline:2px solid var(--accent);
+    outline-offset:2px;
+  }
+
+  .panel{
+    position:absolute;
+    top:0; right:0; bottom:0;
+    width:308px;
+    background:var(--surface);
+    backdrop-filter:blur(10px);
+    border-left:1px solid var(--line);
+    transform:translateX(0);
+    transition:transform .28s ease;
+    z-index:4;
+    display:flex;
+    flex-direction:column;
+  }
+  .panel.hidden{ transform:translateX(100%); }
+  @media (prefers-reduced-motion:reduce){ .panel{ transition:none; } }
+
+  .panel-scroll{
+    overflow-y:auto;
+    padding:76px 22px 22px;
+    display:flex;
+    flex-direction:column;
+    gap:26px;
+    height:100%;
+  }
+  .panel-scroll::-webkit-scrollbar{ width:8px; }
+  .panel-scroll::-webkit-scrollbar-thumb{ background:var(--surface-2); border-radius:4px; }
+
+  .group h2{
+    margin:0 0 14px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:10.5px;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    border-bottom:1px solid var(--line);
+    padding-bottom:8px;
+  }
+  .group{ display:flex; flex-direction:column; }
+
+  .fader{
+    display:flex;
+    flex-direction:column;
+    gap:5px;
+    padding:9px 0;
+  }
+  .fader-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+  }
+  .fader-head label{
+    font-size:12.5px;
+    font-weight:500;
+    color:var(--ink);
+  }
+  .fader-head .meta{
+    display:flex;
+    gap:8px;
+    align-items:baseline;
+    font-family:'IBM Plex Mono', monospace;
+  }
+  .fader-head .code{
+    font-size:10px;
+    color:var(--ink-faint);
+  }
+  .fader-head .value{
+    font-size:11.5px;
+    color:var(--accent);
+    min-width:3ch;
+    text-align:right;
+    font-variant-numeric:tabular-nums;
+  }
+
+  input[type=range]{
+    -webkit-appearance:none;
+    appearance:none;
+    width:100%;
+    height:16px;
+    background:transparent;
+    cursor:pointer;
+    margin:0;
+  }
+  input[type=range]::-webkit-slider-runnable-track{
+    height:3px;
+    background:var(--surface-2);
+    border-radius:2px;
+  }
+  input[type=range]::-moz-range-track{
+    height:3px;
+    background:var(--surface-2);
+    border-radius:2px;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:6px;
+    height:16px;
+    margin-top:-6.5px;
+    background:var(--accent);
+    border-radius:1.5px;
+    box-shadow:0 0 5px rgba(95,212,208,.55);
+  }
+  input[type=range]::-moz-range-thumb{
+    width:6px;
+    height:16px;
+    border:none;
+    background:var(--accent);
+    border-radius:1.5px;
+    box-shadow:0 0 5px rgba(95,212,208,.55);
+  }
+
+  .presets{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:8px;
+    padding-top:6px;
+    border-top:1px solid var(--line);
+  }
+  .preset-btn{
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    color:var(--ink-dim);
+    font-family:'IBM Plex Mono', monospace;
+    font-size:10.5px;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+    padding:9px 4px;
+    border-radius:3px;
+    cursor:pointer;
+  }
+  .preset-btn:hover{ color:var(--ink); border-color:var(--accent-dim); }
+
+  .scan{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+  .scan-axis{
+    display:flex;
+    gap:8px;
+  }
+  .axis-btn{
+    flex:1;
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    color:var(--ink-dim);
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px;
+    padding:7px 4px;
+    border-radius:3px;
+    cursor:pointer;
+  }
+  .axis-btn.active{ color:var(--accent); border-color:var(--accent-dim); }
+  .scan-go{
+    background:var(--accent-dim);
+    border:1px solid var(--accent-dim);
+    color:var(--ink);
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    padding:9px 4px;
+    border-radius:3px;
+    cursor:pointer;
+  }
+  .scan-go:hover{ background:var(--accent); color:var(--ground); }
+  .scan-status{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:10.5px;
+    color:var(--ink-faint);
+    min-height:14px;
+  }
+  .scan-results{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:6px;
+    max-height:220px;
+    overflow-y:auto;
+    padding-right:2px;
+  }
+  .scan-results::-webkit-scrollbar{ width:6px; }
+  .scan-results::-webkit-scrollbar-thumb{ background:var(--surface-2); border-radius:3px; }
+  .find-btn{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:2px;
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    color:var(--ink);
+    padding:7px 2px;
+    border-radius:3px;
+    cursor:pointer;
+  }
+  .find-btn:hover{ border-color:var(--accent); }
+  .find-btn .fold{
+    font-family:'Manrope', sans-serif;
+    font-size:12px;
+    font-weight:700;
+  }
+  .find-btn .val{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:9.5px;
+    color:var(--ink-faint);
+  }
+  .find-btn.just-applied{ border-color:var(--accent); box-shadow:0 0 6px rgba(95,212,208,.35); }
+
+  .source-note{
+    font-size:10.5px;
+    line-height:1.5;
+    color:var(--ink-faint);
+    padding-top:4px;
+  }
+  .source-note a{ color:var(--ink-dim); }
+
+  .webgl-fail{
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--ink-dim);
+    font-family:'IBM Plex Mono', monospace;
+    font-size:13px;
+    text-align:center;
+    padding:40px;
+  }
+
+  @media (max-width:820px){
+    .panel{ width:88vw; max-width:340px; }
+    .panel.hidden{ transform:translateX(100%); }
+  }
+</style>
+
+<div class="stage">
+  <canvas id="gl"></canvas>
+
+  <div class="hud">
+    <div class="hud-row"><span class="hud-label">particles</span><span class="hud-value" id="hudCount">&mdash;</span></div>
+    <div class="hud-row"><span class="hud-label">fps</span><span class="hud-value" id="hudFps">&mdash;</span></div>
+    <div class="hud-row"><span class="hud-label">resonance</span><span class="hud-value" id="hudRes">&mdash;</span></div>
+    <div class="hud-live"><span class="hud-dot"></span><span class="hud-value" style="color:var(--live)">LIVE</span></div>
+  </div>
+
+  <aside class="panel" id="panel">
+    <button class="panel-handle" id="panelToggle" aria-expanded="true" aria-controls="panelScroll" aria-label="Toggle controls">&rsaquo;</button>
+    <div class="panel-scroll" id="panelScroll">
+      <!-- fader groups injected by JS -->
+      <div class="presets" id="presets">
+        <button class="preset-btn" data-preset="original">Original</button>
+        <button class="preset-btn" data-preset="bloom">Bloom</button>
+        <button class="preset-btn" data-preset="drift">Drift</button>
+      </div>
+
+      <section class="group scan" id="scanGroup">
+        <h2>Scan for resonance</h2>
+        <p class="source-note" style="padding-top:0;">Sweeps <span class="code" style="color:var(--ink-dim)">fff</span> or <span class="code" style="color:var(--ink-dim)">posr</span> in 0.001 steps and keeps every point where the winding angle sits near a simple fraction of a full turn &mdash; the condition for a clean, closed petal count.</p>
+        <div class="scan-axis">
+          <button class="axis-btn active" id="axisPosr" data-axis="posr">scan posr</button>
+          <button class="axis-btn" id="axisFff" data-axis="fff">scan fff</button>
+        </div>
+        <button class="scan-go" id="scanGo">Run scan</button>
+        <p class="scan-status" id="scanStatus">not yet run</p>
+        <div class="scan-results" id="scanResults"></div>
+      </section>
+
+      <p class="source-note">Recreated from <span style="color:var(--ink-dim)">ofApp.cpp</span> / <span style="color:var(--ink-dim)">particle.cpp</span> &mdash; parameter codes match the original OSC addresses (<span style="color:var(--ink-dim)">/fff</span>, <span style="color:var(--ink-dim)">/posr</span>, <span style="color:var(--ink-dim)">/fase</span> &hellip;).</p>
+    </div>
+  </aside>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var canvas = document.getElementById('gl');
+  var gl = canvas.getContext('webgl2', { alpha:false, antialias:true, preserveDrawingBuffer:true, premultipliedAlpha:false });
+
+  if(!gl){
+    var fail = document.createElement('div');
+    fail.className = 'webgl-fail';
+    fail.textContent = 'WebGL2 is not available in this browser, so Spiral Bloom cannot render. Try a recent Chrome, Edge or Firefox.';
+    document.querySelector('.stage').appendChild(fail);
+    return;
+  }
+
+  var MAX_NUM = 1000000;
+
+  // ---------- shaders ----------
+
+  function compile(type, src){
+    var sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if(!gl.getShaderParameter(sh, gl.COMPILE_STATUS)){
+      console.error(gl.getShaderInfoLog(sh));
+    }
+    return sh;
+  }
+  function link(vsSrc, fsSrc){
+    var prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, vsSrc));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fsSrc));
+    gl.linkProgram(prog);
+    if(!gl.getProgramParameter(prog, gl.LINK_STATUS)){
+      console.error(gl.getProgramInfoLog(prog));
+    }
+    return prog;
+  }
+
+  var pointVS = [
+    "#version 300 es",
+    "precision highp float;",
+    "in float aIndex;",
+    "in float aZOff;",
+    "uniform float uNum;",
+    "uniform float uR;",
+    "uniform float uDepth;",
+    "uniform float uFase;",
+    "uniform float uFff;",
+    "uniform float uPosr;",
+    "uniform float uFrame;",
+    "uniform float uSelfRot;",
+    "uniform float uPointSize;",
+    "uniform vec2 uViewport;",
+    "out float vGlow;",
+    "void main(){",
+    "  float i = aIndex;",
+    "  float rate = i / uNum;",
+    "  float posR = mod(i, 36000.0) / uPosr;",
+    "  float x = sin(posR * uFff) * uR * rate + sin(i) * uFase;",
+    "  float y = cos(posR * uFff) * uR * rate + cos(i) * uFase;",
+    "  float c = cos(uSelfRot);",
+    "  float s = sin(uSelfRot);",
+    "  float rx = x * c - y * s;",
+    "  float ry = x * s + y * c;",
+    "  float zRaw = mod(aZOff + uFrame * 200.0, 10000.0);",
+    "  float z = zRaw * uDepth;",
+    "  vec2 ndc = vec2(rx, ry) / (0.5 * uViewport);",
+    "  gl_Position = vec4(ndc, clamp(z * 0.00002, -0.9, 0.9), 1.0);",
+    "  float fall = 1.0 - clamp(zRaw/12000.0, 0.0, 0.6);",
+    "  gl_PointSize = max(uPointSize * fall, 1.0);",
+    "  vGlow = fall;",
+    "}"
+  ].join("\n");
+
+  var pointFS = [
+    "#version 300 es",
+    "precision highp float;",
+    "in float vGlow;",
+    "uniform float uAlpha;",
+    "out vec4 fragColor;",
+    "void main(){",
+    "  vec2 d = gl_PointCoord - vec2(0.5);",
+    "  float r = length(d);",
+    "  float intensity = smoothstep(0.5, 0.02, r);",
+    "  float a = intensity * uAlpha * (0.45 + 0.55*vGlow);",
+    "  fragColor = vec4(vec3(1.0) * a, 1.0);",
+    "}"
+  ].join("\n");
+
+  var quadVS = [
+    "#version 300 es",
+    "in vec2 aPos;",
+    "void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }"
+  ].join("\n");
+
+  var quadFS = [
+    "#version 300 es",
+    "precision highp float;",
+    "uniform float uFadeAlpha;",
+    "out vec4 fragColor;",
+    "void main(){ fragColor = vec4(0.0, 0.0, 0.0, uFadeAlpha); }"
+  ].join("\n");
+
+  var pointProg = link(pointVS, pointFS);
+  var quadProg = link(quadVS, quadFS);
+
+  // ---------- buffers ----------
+
+  var indexData = new Float32Array(MAX_NUM);
+  var zOffData = new Float32Array(MAX_NUM);
+  for(var i=0;i<MAX_NUM;i++){
+    indexData[i] = i;
+    zOffData[i] = Math.random()*100000;
+  }
+
+  var indexBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, indexBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, indexData, gl.STATIC_DRAW);
+
+  var zOffBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, zOffBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, zOffData, gl.STATIC_DRAW);
+
+  var pointVAO = gl.createVertexArray();
+  gl.bindVertexArray(pointVAO);
+  var aIndexLoc = gl.getAttribLocation(pointProg, 'aIndex');
+  gl.bindBuffer(gl.ARRAY_BUFFER, indexBuf);
+  gl.enableVertexAttribArray(aIndexLoc);
+  gl.vertexAttribPointer(aIndexLoc, 1, gl.FLOAT, false, 0, 0);
+  var aZOffLoc = gl.getAttribLocation(pointProg, 'aZOff');
+  gl.bindBuffer(gl.ARRAY_BUFFER, zOffBuf);
+  gl.enableVertexAttribArray(aZOffLoc);
+  gl.vertexAttribPointer(aZOffLoc, 1, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+
+  var quadBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+  var quadVAO = gl.createVertexArray();
+  gl.bindVertexArray(quadVAO);
+  var aPosLoc = gl.getAttribLocation(quadProg, 'aPos');
+  gl.enableVertexAttribArray(aPosLoc);
+  gl.vertexAttribPointer(aPosLoc, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+
+  // uniform locations
+  var pU = {
+    num: gl.getUniformLocation(pointProg,'uNum'),
+    r: gl.getUniformLocation(pointProg,'uR'),
+    depth: gl.getUniformLocation(pointProg,'uDepth'),
+    fase: gl.getUniformLocation(pointProg,'uFase'),
+    fff: gl.getUniformLocation(pointProg,'uFff'),
+    posr: gl.getUniformLocation(pointProg,'uPosr'),
+    frame: gl.getUniformLocation(pointProg,'uFrame'),
+    selfRot: gl.getUniformLocation(pointProg,'uSelfRot'),
+    pointSize: gl.getUniformLocation(pointProg,'uPointSize'),
+    viewport: gl.getUniformLocation(pointProg,'uViewport'),
+    alpha: gl.getUniformLocation(pointProg,'uAlpha')
+  };
+  var qU = { fadeAlpha: gl.getUniformLocation(quadProg,'uFadeAlpha') };
+
+  // ---------- param model ----------
+  // eased params glide toward a target at rate `a`, matching the original's
+  // exponential-ease OSC handling. fff/posr/alpha/fade/rotate/size/glide
+  // were unsmoothed (snap) in the source, so they stay that way here.
+
+  var state = {
+    a: 0.008,
+    num:   { cur:220000, target:220000 },
+    r:     { cur:2000,   target:2000 },
+    depth: { cur:0,      target:0 },
+    faseBase: { cur:100, target:100 },
+    lfoSpeed: { cur:0.01, target:0.01 },
+    lfoMax:   { cur:20,   target:20 },
+    fff: 3.782047,
+    posr: 0.433071,
+    rotSpeedDeg: 0.047,
+    alpha: 200,
+    fade: 50,
+    pointSize: 1.2
+  };
+
+  var selfRotDeg = 0;
+  var lfoTheta = 0;
+  var frame = 0;
+
+  // ---------- fader UI ----------
+
+  var paramDefs = [
+    { group:'Form', id:'num', label:'Count', code:'num', min:1000, max:1000000, step:1000, eased:true,
+      get:function(){return state.num.target;}, set:function(v){state.num.target=v;},
+      fmt:function(v){ return v>=1000 ? (v/1000).toFixed(0)+'k' : String(Math.round(v)); } },
+    { group:'Form', id:'r', label:'Spread', code:'r', min:200, max:4000, step:10, eased:true,
+      get:function(){return state.r.target;}, set:function(v){state.r.target=v;},
+      fmt:function(v){ return Math.round(v); } },
+    { group:'Form', id:'fff', label:'Spin', code:'fff', min:0.1, max:20, step:0.01, eased:false,
+      get:function(){return state.fff;}, set:function(v){state.fff=v;},
+      fmt:function(v){ return v.toFixed(2); } },
+    { group:'Form', id:'posr', label:'Wind', code:'posr', min:0.05, max:5, step:0.001, eased:false,
+      get:function(){return state.posr;}, set:function(v){state.posr=v;},
+      fmt:function(v){ return v.toFixed(3); } },
+    { group:'Form', id:'fase', label:'Scatter', code:'fase', min:0, max:400, step:1, eased:true,
+      get:function(){return state.faseBase.target;}, set:function(v){state.faseBase.target=v;},
+      fmt:function(v){ return Math.round(v); } },
+    { group:'Form', id:'depth', label:'Depth', code:'depth', min:0, max:3, step:0.01, eased:true,
+      get:function(){return state.depth.target;}, set:function(v){state.depth.target=v;},
+      fmt:function(v){ return v.toFixed(2); } },
+
+    { group:'Motion', id:'a', label:'Glide', code:'a', min:0.001, max:0.2, step:0.001, eased:false,
+      get:function(){return state.a;}, set:function(v){state.a=v;},
+      fmt:function(v){ return v.toFixed(3); } },
+    { group:'Motion', id:'rot', label:'Rotate', code:'rot', min:0, max:2, step:0.001, eased:false,
+      get:function(){return state.rotSpeedDeg;}, set:function(v){state.rotSpeedDeg=v;},
+      fmt:function(v){ return v.toFixed(3); } },
+    { group:'Motion', id:'lfo', label:'Pulse speed', code:'lfo', min:0, max:0.5, step:0.001, eased:true,
+      get:function(){return state.lfoSpeed.target;}, set:function(v){state.lfoSpeed.target=v;},
+      fmt:function(v){ return v.toFixed(3); } },
+    { group:'Motion', id:'lfo_d', label:'Pulse depth', code:'lfo_d', min:0, max:200, step:1, eased:true,
+      get:function(){return state.lfoMax.target;}, set:function(v){state.lfoMax.target=v;},
+      fmt:function(v){ return Math.round(v); } },
+
+    { group:'Light', id:'alpha', label:'Glow', code:'alpha', min:0, max:255, step:1, eased:false,
+      get:function(){return state.alpha;}, set:function(v){state.alpha=v;},
+      fmt:function(v){ return Math.round(v); } },
+    { group:'Light', id:'fade', label:'Decay', code:'fade', min:1, max:255, step:1, eased:false,
+      get:function(){return state.fade;}, set:function(v){state.fade=v;},
+      fmt:function(v){ return Math.round(v); } },
+    { group:'Light', id:'size', label:'Size', code:'size', min:0.5, max:4, step:0.1, eased:false,
+      get:function(){return state.pointSize;}, set:function(v){state.pointSize=v;},
+      fmt:function(v){ return v.toFixed(1); } }
+  ];
+
+  var groups = [];
+  var groupEls = {};
+  paramDefs.forEach(function(def){
+    if(groups.indexOf(def.group) === -1) groups.push(def.group);
+  });
+
+  var panelScroll = document.getElementById('panelScroll');
+  var presetsEl = document.getElementById('presets');
+
+  groups.forEach(function(g){
+    var section = document.createElement('section');
+    section.className = 'group';
+    var h2 = document.createElement('h2');
+    h2.textContent = g;
+    section.appendChild(h2);
+    panelScroll.insertBefore(section, presetsEl);
+    groupEls[g] = section;
+  });
+
+  var inputs = {};
+  paramDefs.forEach(function(def){
+    var row = document.createElement('div');
+    row.className = 'fader';
+
+    var head = document.createElement('div');
+    head.className = 'fader-head';
+    var label = document.createElement('label');
+    label.setAttribute('for', 'f-'+def.id);
+    label.textContent = def.label;
+    var meta = document.createElement('div');
+    meta.className = 'meta';
+    var code = document.createElement('span');
+    code.className = 'code';
+    code.textContent = def.code;
+    var value = document.createElement('span');
+    value.className = 'value';
+    value.textContent = def.fmt(def.get());
+    meta.appendChild(code);
+    meta.appendChild(value);
+    head.appendChild(label);
+    head.appendChild(meta);
+
+    var input = document.createElement('input');
+    input.type = 'range';
+    input.id = 'f-'+def.id;
+    input.min = def.min;
+    input.max = def.max;
+    input.step = def.step;
+    input.value = def.get();
+
+    input.addEventListener('input', function(){
+      var v = parseFloat(input.value);
+      def.set(v);
+      value.textContent = def.fmt(v);
+    });
+
+    row.appendChild(head);
+    row.appendChild(input);
+    groupEls[def.group].appendChild(row);
+    inputs[def.id] = input;
+  });
+
+  function refreshInputs(){
+    paramDefs.forEach(function(def){
+      var v = def.get();
+      inputs[def.id].value = v;
+      inputs[def.id].parentNode.querySelector('.value').textContent = def.fmt(v);
+    });
+  }
+
+  // ---------- presets ----------
+  // "Original" mirrors ofApp.h's literal defaults. "Bloom" and "Drift" sit at
+  // opposite ends of the fff/posr resonance spectrum discussed above.
+
+  var presets = {
+    original: { num:300000, r:2000, fff:3.782047, posr:0.433071, fase:100, depth:0,
+                a:0.008, rot:0.047, lfo:0.01, lfo_d:20, alpha:200, fade:50, size:1.2 },
+    bloom:    { num:260000, r:1700, fff:6.912, posr:0.5, fase:20, depth:0.35,
+                a:0.02, rot:0.06, lfo:0.012, lfo_d:8, alpha:150, fade:42, size:1.4 },
+    drift:    { num:400000, r:2200, fff:3.782047, posr:0.433071, fase:220, depth:0.6,
+                a:0.006, rot:0.12, lfo:0.03, lfo_d:60, alpha:110, fade:28, size:1.1 }
+  };
+
+  function applyPreset(name){
+    var p = presets[name];
+    if(!p) return;
+    state.num.target = p.num;
+    state.r.target = p.r;
+    state.fff = p.fff;
+    state.posr = p.posr;
+    state.faseBase.target = p.fase;
+    state.depth.target = p.depth;
+    state.a = p.a;
+    state.rotSpeedDeg = p.rot;
+    state.lfoSpeed.target = p.lfo;
+    state.lfoMax.target = p.lfo_d;
+    state.alpha = p.alpha;
+    state.fade = p.fade;
+    state.pointSize = p.size;
+    refreshInputs();
+  }
+
+  document.querySelectorAll('.preset-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      applyPreset(btn.getAttribute('data-preset'));
+    });
+  });
+
+  // ---------- panel toggle ----------
+
+  var panel = document.getElementById('panel');
+  var panelToggle = document.getElementById('panelToggle');
+  panelToggle.addEventListener('click', function(){
+    var hidden = panel.classList.toggle('hidden');
+    panelToggle.setAttribute('aria-expanded', String(!hidden));
+    panelToggle.innerHTML = hidden ? '&lsaquo;' : '&rsaquo;';
+  });
+
+  // ---------- resonance readout ----------
+
+  function bestRational(x, maxDen){
+    var f = x - Math.floor(x);
+    if(f < 1e-9 || f > 1-1e-9) return [0, 1, Math.min(f,1-f)];
+    // continued-fraction convergents of f: h(-1)/k(-1)=1/0, h0/k0=0/1, then refine
+    var h1=1, k1=0, h0=0, k0=1;
+    var bestP=h0, bestQ=k0;
+    var rem=f;
+    for(var i=0;i<20 && rem>1e-9;i++){
+      var xi = 1/rem;
+      var ai = Math.floor(xi);
+      var h2 = ai*h0 + h1;
+      var k2 = ai*k0 + k1;
+      if(k2 > maxDen) break;
+      h1=h0; k1=k0; h0=h2; k0=k2;
+      bestP=h0; bestQ=k0;
+      rem = xi - ai;
+    }
+    return [bestP, bestQ, Math.abs(f - bestP/bestQ)];
+  }
+
+  var hudRes = document.getElementById('hudRes');
+  function updateResonance(){
+    var delta = state.fff / state.posr;
+    var turns = delta / (2*Math.PI);
+    var approx = bestRational(turns, 24);
+    var q = approx[1], err = approx[2];
+    var label;
+    if(err < 0.006) label = q + '-fold · locked';
+    else if(err < 0.03) label = '≈ ' + q + '-fold · drifting';
+    else label = 'diffuse';
+    hudRes.textContent = label;
+  }
+
+  // ---------- resonance scanner ----------
+  // Sweeps one axis (fff or posr) at a fine step, holding the other fixed at
+  // its current live value, and keeps the local best point inside every
+  // "basin" where the winding angle sits close to a simple p/q turn of the
+  // circle. Each basin becomes one recall button.
+
+  var scanAxis = 'posr';
+  var scanFinds = [];
+
+  document.getElementById('axisPosr').addEventListener('click', function(){ setScanAxis('posr'); });
+  document.getElementById('axisFff').addEventListener('click', function(){ setScanAxis('fff'); });
+  function setScanAxis(axis){
+    scanAxis = axis;
+    document.getElementById('axisPosr').classList.toggle('active', axis==='posr');
+    document.getElementById('axisFff').classList.toggle('active', axis==='fff');
+  }
+
+  function runScan(){
+    var def = paramDefs.filter(function(d){ return d.id===scanAxis; })[0];
+    var otherVal = scanAxis==='posr' ? state.fff : state.posr;
+    var step = 0.001;
+    var THRESH = 0.0035;
+    var Q_MIN = 3, Q_MAX = 24;
+    var results = [];
+    var inBasin = false, bestErr = Infinity, bestV = null, bestQ = null, bestP = null;
+
+    function commit(){
+      results.push({ v:bestV, q:bestQ, p:bestP, err:bestErr });
+      inBasin = false; bestErr = Infinity;
+    }
+
+    var steps = Math.round((def.max - def.min) / step);
+    for(var i=0;i<=steps;i++){
+      var v = def.min + i*step;
+      var fffV = scanAxis==='fff' ? v : otherVal;
+      var posrV = scanAxis==='posr' ? v : otherVal;
+      var delta = fffV / Math.max(posrV, 1e-6);
+      var turns = delta / (2*Math.PI);
+      // cap the convergent search at Q_MAX so the error reflects "how well
+      // does a visually-countable fold number fit here", not a coincidental
+      // deep, invisible-to-the-eye high-denominator match.
+      var approx = bestRational(turns, Q_MAX);
+      var q = approx[1], p = approx[0], err = approx[2];
+      var good = err < THRESH && q >= Q_MIN;
+      if(good){
+        if(err < bestErr){ bestErr=err; bestV=v; bestQ=q; bestP=p; }
+        inBasin = true;
+      } else if(inBasin){
+        commit();
+      }
+    }
+    if(inBasin) commit();
+
+    // keep the cleanest finds, then sort back into axis order for browsing
+    results.sort(function(a,b){ return a.err - b.err; });
+    results = results.slice(0, 18);
+    results.sort(function(a,b){ return a.v - b.v; });
+    scanFinds = results;
+    renderScanResults();
+  }
+
+  function renderScanResults(){
+    var wrap = document.getElementById('scanResults');
+    var status = document.getElementById('scanStatus');
+    wrap.innerHTML = '';
+    if(scanFinds.length === 0){
+      status.textContent = 'no clean resonance found in range — try the other axis';
+      return;
+    }
+    var axDef = paramDefs.filter(function(d){return d.id===scanAxis;})[0];
+    status.textContent = scanFinds.length + ' resonances found along ' + scanAxis + ' (' + axDef.min + ' to ' + axDef.max + ', step 0.001)';
+    scanFinds.forEach(function(f){
+      var btn = document.createElement('button');
+      btn.className = 'find-btn';
+      var fold = document.createElement('span');
+      fold.className = 'fold';
+      fold.textContent = f.q + '-fold';
+      var val = document.createElement('span');
+      val.className = 'val';
+      val.textContent = scanAxis + ' ' + f.v.toFixed(3);
+      btn.appendChild(fold);
+      btn.appendChild(val);
+      btn.title = 'p/q ≈ ' + f.p + '/' + f.q + ' · error ' + f.err.toFixed(5);
+      btn.addEventListener('click', function(){
+        if(scanAxis==='posr'){ state.posr = f.v; } else { state.fff = f.v; }
+        refreshInputs();
+        updateResonance();
+        document.querySelectorAll('.find-btn.just-applied').forEach(function(b){ b.classList.remove('just-applied'); });
+        btn.classList.add('just-applied');
+      });
+      wrap.appendChild(btn);
+    });
+  }
+
+  document.getElementById('scanGo').addEventListener('click', runScan);
+
+  // ---------- resize ----------
+
+  function resize(){
+    var dpr = Math.min(window.devicePixelRatio||1, 2);
+    var w = Math.floor(window.innerWidth * dpr);
+    var h = Math.floor(window.innerHeight * dpr);
+    if(canvas.width!==w || canvas.height!==h){
+      canvas.width = w;
+      canvas.height = h;
+      gl.viewport(0,0,w,h);
+    }
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- animation loop ----------
+
+  gl.disable(gl.DEPTH_TEST);
+  gl.enable(gl.BLEND);
+
+  var hudCount = document.getElementById('hudCount');
+  var hudFps = document.getElementById('hudFps');
+  var fpsAcc = 0, fpsFrames = 0, lastT = performance.now();
+  var resTimer = 0;
+
+  function tick(t){
+    requestAnimationFrame(tick);
+
+    var a = state.a;
+    state.num.cur += -(state.num.cur - state.num.target)*a;
+    state.r.cur += -(state.r.cur - state.r.target)*a;
+    state.depth.cur += -(state.depth.cur - state.depth.target)*a;
+    state.faseBase.cur += -(state.faseBase.cur - state.faseBase.target)*a;
+    state.lfoSpeed.cur += -(state.lfoSpeed.cur - state.lfoSpeed.target)*a;
+    state.lfoMax.cur += -(state.lfoMax.cur - state.lfoMax.target)*a;
+
+    selfRotDeg = (selfRotDeg + state.rotSpeedDeg) % 36000;
+    lfoTheta += state.lfoSpeed.cur * 0.6;
+    var lfoVal = (Math.sin(lfoTheta)*0.5+0.5) * state.lfoMax.cur;
+    var fase = state.faseBase.cur + lfoVal;
+
+    frame++;
+
+    var drawCount = Math.max(1, Math.min(MAX_NUM, Math.ceil(state.num.cur)));
+
+    // fade / trail pass
+    gl.useProgram(quadProg);
+    gl.bindVertexArray(quadVAO);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.uniform1f(qU.fadeAlpha, state.fade/255);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    // points pass (additive glow)
+    gl.useProgram(pointProg);
+    gl.bindVertexArray(pointVAO);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.uniform1f(pU.num, Math.max(state.num.cur,1));
+    gl.uniform1f(pU.r, state.r.cur);
+    gl.uniform1f(pU.depth, state.depth.cur);
+    gl.uniform1f(pU.fase, fase);
+    gl.uniform1f(pU.fff, state.fff);
+    gl.uniform1f(pU.posr, Math.max(state.posr, 0.001));
+    gl.uniform1f(pU.frame, frame);
+    gl.uniform1f(pU.selfRot, selfRotDeg * Math.PI/180);
+    gl.uniform1f(pU.pointSize, state.pointSize);
+    gl.uniform2f(pU.viewport, canvas.width, canvas.height);
+    gl.uniform1f(pU.alpha, state.alpha/255);
+    gl.drawArrays(gl.POINTS, 0, drawCount);
+
+    fpsFrames++;
+    if(t - lastT > 400){
+      var fps = fpsFrames*1000/(t-lastT);
+      hudFps.textContent = fps.toFixed(0);
+      hudCount.textContent = Math.round(state.num.cur).toLocaleString();
+      fpsFrames = 0; lastT = t;
+    }
+
+    resTimer++;
+    if(resTimer > 12){ updateResonance(); resTimer = 0; }
+  }
+
+  refreshInputs();
+  updateResonance();
+  requestAnimationFrame(tick);
+
+})();
+</script>
