@@ -1,6 +1,7 @@
 # Spiral Bloom
 
 openFrameworks で書かれた [mutek_archive](https://github.com/sw-sw-sw/mutek_archive) のパーティクルビジュアル(`ofApp.cpp` / `particle.cpp`)を、そのまま WebGL2 に移植した単一 HTML ファイル。ビルド不要・依存ライブラリなしで、`spiral-bloom.html` をブラウザで開くだけで動作します。MUTEK のライブで使われた元コードの数式をそのまま再現しつつ、右サイドパネルから全パラメータをリアルタイムに操作できます。
+<img width="2920" height="2188" alt="image" src="https://github.com/user-attachments/assets/7e1a9554-2b69-4f0a-bdb8-017764b417d9" />
 
 https://sw-sw-sw.github.io/mutek_archive2/spiral-bloom.html
 
